@@ -36,21 +36,22 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             device = await navigator.serial.requestPort({});
-            // 修改: 直接使用导入的 Transport
             transport = new Transport(device);
             
             const baudrate = (chipSelect.value === 'esp32c3') ? 115200 : 921600;
 
-            // 修改: 直接使用导入的 ESPLoader
             esploader = new ESPLoader({
                 transport,
                 baudrate,
                 terminal: terminal,
             });
 
-            // 连接逻辑保持不变
-            await esploader.main_fn();
-            await esploader.flash_id();
+            // ==========================================================
+            //  核心修改在这里！
+            // ==========================================================
+            terminal.writeLine('正在连接设备...');
+            await esploader.connect();
+            // ==========================================================
 
             connectButton.textContent = '断开连接';
             flashButton.disabled = false;
@@ -65,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
             device = undefined;
         }
     });
+
 
     // 2. 烧录固件逻辑 (这部分内部逻辑完全不需要改变)
     flashButton.addEventListener('click', async () => {
