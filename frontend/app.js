@@ -98,7 +98,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 const fileUrl = `${BACKEND_URL}/firmware/${selectedChip}/${part.file}`;
                 const fileResponse = await fetch(fileUrl);
                 if (!fileResponse.ok) throw new Error(`下载 ${part.file} 失败`);
-                const data = await fileResponse.arrayBuffer();
+                 const data = await fileResponse.text();
+                console.log(`文件 ${part.file} 下载完成，获取到的数据大小: ${data.byteLength} 字节`);
                 filesToFlash.push({ data, address: part.address });
             }
             terminal.writeLine('所有固件文件下载完成！');
