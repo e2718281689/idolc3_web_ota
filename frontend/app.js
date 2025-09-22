@@ -68,13 +68,14 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
 
-    // 2. 烧录固件逻辑 (这部分内部逻辑完全不需要改变)
+    // 2. 烧录固件逻辑 (最终的、基于官方示例验证的正确版本)
     flashButton.addEventListener('click', async () => {
         if (!esploader) {
             terminal.writeLine('错误：设备未连接。');
             return;
         }
 
+        // 禁用按钮，防止重复点击
         flashButton.disabled = true;
         connectButton.disabled = true;
         terminal.clean();
@@ -84,48 +85,65 @@ document.addEventListener('DOMContentLoaded', () => {
             const selectedChip = chipSelect.value;
             terminal.writeLine(`目标芯片: ${selectedChip}`);
 
-            // A: 获取清单
-            terminal.writeLine('正在从后端获取固件清单...');
+            // 步骤 A: 获取清单
             const manifestResponse = await fetch(`${BACKEND_URL}/api/firmware/${selectedChip}`);
             if (!manifestResponse.ok) throw new Error(`获取清单失败: ${manifestResponse.statusText}`);
             const manifest = await manifestResponse.json();
             terminal.writeLine('清单获取成功！');
 
-            // B: 下载固件
-            const filePromises = manifest.map(async (part) => {
+            // 步骤 B: 下载固件
+            const filesToFlash = [];
+            for (const part of manifest) {
                 terminal.writeLine(` -> 正在下载 ${part.file}...`);
                 const fileUrl = `${BACKEND_URL}/firmware/${selectedChip}/${part.file}`;
                 const fileResponse = await fetch(fileUrl);
                 if (!fileResponse.ok) throw new Error(`下载 ${part.file} 失败`);
-                const binary = await fileResponse.arrayBuffer();
-                const dataAsString = new TextDecoder().decode(new Uint8Array(binary));
-                return { data: dataAsString, address: part.address };
-            });
-            const fileArray = await Promise.all(filePromises);
+                const data = await fileResponse.arrayBuffer();
+                filesToFlash.push({ data, address: part.address });
+            }
             terminal.writeLine('所有固件文件下载完成！');
 
-            // C: 烧录
+            // 步骤 C: 执行烧录
             terminal.writeLine('准备烧录到设备...');
-            await esploader.write_flash(
-                fileArray, 'keep', 'keep', 'keep', false,
-                (fileIndex, written, total) => {
-                    const progress = Math.round((written / total) * 100);
-                    if (progress % 10 === 0) {
-                        terminal.write(`\r烧录文件 ${fileIndex + 1}/${fileArray.length}: ${progress}%`);
-                    }
-                }
-            );
+            await esploader.writeFlash({
+                fileArray: filesToFlash,
+                flashSize: "keep",
+                eraseAll: false,
+                compress: true,
+                onProgress: (bytesWritten, totalBytes) => {
+                    const progress = Math.round((bytesWritten / totalBytes) * 100);
+                    const progressBar = `[${'='.repeat(Math.round(progress / 2))}${' '.repeat(50 - Math.round(progress / 2))}]`;
+                    terminal.write(`\r烧录进度: ${progress}% ${progressBar}`);
+                },
+            });
+
             terminal.writeLine('\n烧录成功！');
-            terminal.writeLine('设备将在几秒后重启...');
-            await esploader.hard_reset();
+            terminal.writeLine('正在断开连接以重启设备...');
+
+            // =====================================================================
+            //  核心修改：调用 transport.disconnect() 来关闭串口，这将触发设备重启
+            // =====================================================================
+            await transport.disconnect();
+            
+            terminal.writeLine('设备已重启并断开连接。请重新连接以进行下一次操作。');
 
         } catch (e) {
             console.error(e);
             terminal.writeLine(`\n烧录过程中发生严重错误: ${e.message}`);
         } finally {
-            flashButton.disabled = false;
+            // UI 状态更新：烧录流程结束后，重置所有状态到初始未连接状态
+            if (transport && device && transport.connected) {
+                 try { await transport.disconnect(); } catch(e) { /* 忽略错误 */ }
+            }
+            device = undefined;
+            transport = undefined;
+            esploader = undefined;
+            connectButton.textContent = '1. 连接设备';
+            flashButton.disabled = true;
             connectButton.disabled = false;
         }
     });
+
+
 });
 
