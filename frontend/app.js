@@ -182,13 +182,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 },
             });
 
-            // terminal.writeLine('\n烧录成功！');
-            // terminal.writeLine('正在断开连接以重启设备...');
+            await esploader.after?.();   // 有则调用
+            await transport.setDTR(false);
+            await new Promise(r => setTimeout(r, 100));
+            await transport.setDTR(true);
 
-            // // =====================================================================
-            // //  核心修改：调用 transport.disconnect() 来关闭串口，这将触发设备重启
-            // // =====================================================================
-            // await transport.disconnect();
             
             // terminal.writeLine('设备已重启并断开连接。请重新连接以进行下一次操作。');
 
