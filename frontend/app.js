@@ -1,5 +1,6 @@
 // 在文件顶部导入所需的模块
 import { ESPLoader, Transport } from 'esptool-js';
+import JSZip from "jszip";
 
 document.addEventListener('DOMContentLoaded', () => {
     const connectButton = document.getElementById('connectButton');
@@ -50,7 +51,7 @@ document.addEventListener('DOMContentLoaded', () => {
             //  核心修改在这里！
             // ==========================================================
             terminal.writeLine('正在连接设备...');
-            await esploader.connect();
+            await esploader.main();
             // ==========================================================
 
             connectButton.textContent = '断开连接';
@@ -67,6 +68,14 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    function u8ToBinaryString(u8) {
+        const CHUNK = 0x8000;
+        let result = "";
+        for (let i = 0; i < u8.length; i += CHUNK) {
+            result += String.fromCharCode(...u8.subarray(i, i + CHUNK));
+        }
+        return result;
+    }
 
     // 2. 烧录固件逻辑 (最终的、基于官方示例验证的正确版本)
     flashButton.addEventListener('click', async () => {
@@ -85,48 +94,103 @@ document.addEventListener('DOMContentLoaded', () => {
             const selectedChip = chipSelect.value;
             terminal.writeLine(`目标芯片: ${selectedChip}`);
 
-            // 步骤 A: 获取清单
-            const manifestResponse = await fetch(`${BACKEND_URL}/api/firmware/${selectedChip}`);
-            if (!manifestResponse.ok) throw new Error(`获取清单失败: ${manifestResponse.statusText}`);
-            const manifest = await manifestResponse.json();
-            terminal.writeLine('清单获取成功！');
+            const resp = await fetch("/firmware-v1.0.1-.zip");
+            if (!resp.ok) throw new Error("Failed to fetch zip");
 
-            // 步骤 B: 下载固件
-            const filesToFlash = [];
-            for (const part of manifest) {
-                terminal.writeLine(` -> 正在下载 ${part.file}...`);
-                const fileUrl = `${BACKEND_URL}/firmware/${selectedChip}/${part.file}`;
-                const fileResponse = await fetch(fileUrl);
-                if (!fileResponse.ok) throw new Error(`下载 ${part.file} 失败`);
-                 const data = await fileResponse.text();
-                console.log(`文件 ${part.file} 下载完成，获取到的数据大小: ${data.byteLength} 字节`);
-                filesToFlash.push({ data, address: part.address });
+            const buffer = await resp.arrayBuffer();
+            const zip = await JSZip.loadAsync(buffer);
+
+            Object.keys(zip.files).forEach((name) => {
+                console.log("file:", name);
+            });
+
+            const manifest = JSON.parse(
+            await zip.file("flasher_args.json").async("string")
+            );
+            console.log("file:", manifest);
+
+            for (const [offset, file] of Object.entries(manifest.flash_files)) 
+            {
+                console.log("offset:", offset, "file:", file); 
             }
-            terminal.writeLine('所有固件文件下载完成！');
 
-            // 步骤 C: 执行烧录
-            terminal.writeLine('准备烧录到设备...');
+            // const baseDir = manifestPath.includes("/")? manifestPath.slice(0, manifestPath.lastIndexOf("/") + 1): "";
+            // 构造 esptool-js 需要的 fileArray
+            const fileArray = [];
+            for (const [offsetStr, relPath] of Object.entries(manifest.flash_files)) {
+                const address = parseInt(offsetStr); // 支持 "0x..."
+                const filePath = relPath;
+
+                const entry = zip.file(filePath);
+                if (!entry) throw new Error(`Missing file in zip: ${filePath} (offset ${offsetStr})`);
+
+                // 用 "string" 返回 binary string，兼容你现有 CryptoJS + esptool-js 写法
+                const u8 = await entry.async("uint8array");
+                const data = u8ToBinaryString(u8);     // ✅ 变成 binary string
+
+                fileArray.push({ address, data });
+            }
+
+            fileArray.sort((a, b) => a.address - b.address);
+
+            // await esploader.writeFlash({
+            // fileArray,
+            // eraseAll: false,
+            // compress: true,
+            // reportProgress: (fileIndex, written, total) => {
+            //     const pct = ((written / total) * 100).toFixed(1);
+            //     term.write(`\r[FLASH] file#${fileIndex} ${pct}%   `);
+            // },
+            // calculateMD5Hash: (image) => CryptoJS.MD5(CryptoJS.enc.Latin1.parse(image)),
+            // });
+
+            // term.writeln("\n[FLASH] Done.");
+            // await esploader.after(); // 你原本就有
+            // term.writeln("[FLASH] after() done.");
+
+            // // 步骤 A: 获取清单
+            // const manifestResponse = await fetch(`${BACKEND_URL}/api/firmware/${selectedChip}`);
+            // if (!manifestResponse.ok) throw new Error(`获取清单失败: ${manifestResponse.statusText}`);
+            // const manifest = await manifestResponse.json();
+            // terminal.writeLine('清单获取成功！');
+
+            // // 步骤 B: 下载固件
+            // const filesToFlash = [];
+            // for (const part of manifest) {
+            //     terminal.writeLine(` -> 正在下载 ${part.file}...`);
+            //     const fileUrl = `${BACKEND_URL}/firmware/${selectedChip}/${part.file}`;
+            //     const fileResponse = await fetch(fileUrl);
+            //     if (!fileResponse.ok) throw new Error(`下载 ${part.file} 失败`);
+            //      const data = await fileResponse.text();
+            //     console.log(`文件 ${part.file} 下载完成，获取到的数据大小: ${data.byteLength} 字节`);
+            //     filesToFlash.push({ data, address: part.address });
+            // }
+            // terminal.writeLine('所有固件文件下载完成！');
+
+            // // 步骤 C: 执行烧录
+            // terminal.writeLine('准备烧录到设备...');
             await esploader.writeFlash({
-                fileArray: filesToFlash,
-                flashSize: "keep",
+                fileArray: fileArray,
+                flashMode: "dio",   // "dio"
+                flashSize: "4MB",   // "4MB"
+                flashFreq: "80m",   // "80m"
                 eraseAll: false,
                 compress: true,
-                onProgress: (bytesWritten, totalBytes) => {
-                    const progress = Math.round((bytesWritten / totalBytes) * 100);
-                    const progressBar = `[${'='.repeat(Math.round(progress / 2))}${' '.repeat(50 - Math.round(progress / 2))}]`;
-                    terminal.write(`\r烧录进度: ${progress}% ${progressBar}`);
+                reportProgress: (fileIndex, written, total) => {
+                    const progress = Math.round((written / total) * 100);
+                    terminal.write(`\r烧录进度: ${progress}%`);
                 },
             });
 
-            terminal.writeLine('\n烧录成功！');
-            terminal.writeLine('正在断开连接以重启设备...');
+            // terminal.writeLine('\n烧录成功！');
+            // terminal.writeLine('正在断开连接以重启设备...');
 
-            // =====================================================================
-            //  核心修改：调用 transport.disconnect() 来关闭串口，这将触发设备重启
-            // =====================================================================
-            await transport.disconnect();
+            // // =====================================================================
+            // //  核心修改：调用 transport.disconnect() 来关闭串口，这将触发设备重启
+            // // =====================================================================
+            // await transport.disconnect();
             
-            terminal.writeLine('设备已重启并断开连接。请重新连接以进行下一次操作。');
+            // terminal.writeLine('设备已重启并断开连接。请重新连接以进行下一次操作。');
 
         } catch (e) {
             console.error(e);
