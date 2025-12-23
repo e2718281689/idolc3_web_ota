@@ -8,8 +8,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const chipSelect = document.getElementById('chip-select');
     const log = document.getElementById('log');
 
-    // 后端 API 地址保持不变
-    const BACKEND_URL = 'http://127.0.0.1:8000';
     let device, transport, esploader;
 
     // terminal 对象保持不变
@@ -94,7 +92,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const selectedChip = chipSelect.value;
             terminal.writeLine(`目标芯片: ${selectedChip}`);
 
-            const resp = await fetch("/firmware-v1.0.1-.zip");
+
+            const workerUrl = 'https://spring-morning-16c2.cjia3254.workers.dev/?url='; 
+            const originalUrl = 'https://github.com/e2718281689/idol-c3/releases/download/v1.0.1/firmware-v1.0.1-.zip';
+
+            // 拼接
+            const proxyUrl = workerUrl + originalUrl; 
+
+            const resp = await fetch(proxyUrl);
             if (!resp.ok) throw new Error("Failed to fetch zip");
 
             const buffer = await resp.arrayBuffer();
@@ -133,42 +138,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             fileArray.sort((a, b) => a.address - b.address);
 
-            // await esploader.writeFlash({
-            // fileArray,
-            // eraseAll: false,
-            // compress: true,
-            // reportProgress: (fileIndex, written, total) => {
-            //     const pct = ((written / total) * 100).toFixed(1);
-            //     term.write(`\r[FLASH] file#${fileIndex} ${pct}%   `);
-            // },
-            // calculateMD5Hash: (image) => CryptoJS.MD5(CryptoJS.enc.Latin1.parse(image)),
-            // });
-
-            // term.writeln("\n[FLASH] Done.");
-            // await esploader.after(); // 你原本就有
-            // term.writeln("[FLASH] after() done.");
-
-            // // 步骤 A: 获取清单
-            // const manifestResponse = await fetch(`${BACKEND_URL}/api/firmware/${selectedChip}`);
-            // if (!manifestResponse.ok) throw new Error(`获取清单失败: ${manifestResponse.statusText}`);
-            // const manifest = await manifestResponse.json();
-            // terminal.writeLine('清单获取成功！');
-
-            // // 步骤 B: 下载固件
-            // const filesToFlash = [];
-            // for (const part of manifest) {
-            //     terminal.writeLine(` -> 正在下载 ${part.file}...`);
-            //     const fileUrl = `${BACKEND_URL}/firmware/${selectedChip}/${part.file}`;
-            //     const fileResponse = await fetch(fileUrl);
-            //     if (!fileResponse.ok) throw new Error(`下载 ${part.file} 失败`);
-            //      const data = await fileResponse.text();
-            //     console.log(`文件 ${part.file} 下载完成，获取到的数据大小: ${data.byteLength} 字节`);
-            //     filesToFlash.push({ data, address: part.address });
-            // }
-            // terminal.writeLine('所有固件文件下载完成！');
-
-            // // 步骤 C: 执行烧录
-            // terminal.writeLine('准备烧录到设备...');
             await esploader.writeFlash({
                 fileArray: fileArray,
                 flashMode: "dio",   // "dio"
@@ -176,10 +145,6 @@ document.addEventListener('DOMContentLoaded', () => {
                 flashFreq: "80m",   // "80m"
                 eraseAll: false,
                 compress: true,
-                reportProgress: (fileIndex, written, total) => {
-                    const progress = Math.round((written / total) * 100);
-                    terminal.write(`\r烧录进度: ${progress}%`);
-                },
             });
 
             await esploader.after?.();   // 有则调用
@@ -188,7 +153,6 @@ document.addEventListener('DOMContentLoaded', () => {
             await transport.setDTR(true);
 
             
-            // terminal.writeLine('设备已重启并断开连接。请重新连接以进行下一次操作。');
 
         } catch (e) {
             console.error(e);
