@@ -93,8 +93,8 @@ document.addEventListener('DOMContentLoaded', () => {
             terminal.writeLine(`目标芯片: ${selectedChip}`);
 
 
-            const workerUrl = 'https://spring-morning-16c2.cjia3254.workers.dev/?url='; 
-            const originalUrl = 'https://github.com/e2718281689/idol-c3/releases/download/v1.0.1/firmware-v1.0.1-.zip';
+            const workerUrl = 'https://spring-morning-16c2.cjia3254.workers.dev/'; 
+            const originalUrl = 'github.com/e2718281689/idol-c3/releases/download/v1.0.1/firmware-v1.0.1-.zip';
 
             // 拼接
             const proxyUrl = workerUrl + originalUrl; 
